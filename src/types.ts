@@ -4,6 +4,7 @@ export const MCP_OUTPUT_MODES = ["hidden", "summary", "preview"] as const;
 export const CUSTOM_TOOL_OVERRIDE_KINDS = ["generic", "mcp"] as const;
 export const CUSTOM_TOOL_OUTPUT_MODES = ["hidden", "summary", "preview"] as const;
 export const BASH_OUTPUT_MODES = ["opencode", "summary", "preview"] as const;
+export const BASH_CALL_MODES = ["semantic", "raw"] as const;
 export const DIFF_VIEW_MODES = ["auto", "split", "unified"] as const;
 export const DIFF_INDICATOR_MODES = ["bars", "classic", "none"] as const;
 
@@ -13,6 +14,7 @@ export type McpOutputMode = (typeof MCP_OUTPUT_MODES)[number];
 export type CustomToolOverrideKind = (typeof CUSTOM_TOOL_OVERRIDE_KINDS)[number];
 export type CustomToolOutputMode = (typeof CUSTOM_TOOL_OUTPUT_MODES)[number];
 export type BashOutputMode = (typeof BASH_OUTPUT_MODES)[number];
+export type BashCallMode = (typeof BASH_CALL_MODES)[number];
 export type DiffViewMode = (typeof DIFF_VIEW_MODES)[number];
 export type DiffIndicatorMode = (typeof DIFF_INDICATOR_MODES)[number];
 
@@ -55,6 +57,7 @@ export interface ToolDisplayConfig {
 	previewLines: number;
 	expandedPreviewMaxLines: number;
 	bashOutputMode: BashOutputMode;
+	bashCallMode: BashCallMode;
 	bashCollapsedLines: number;
 	diffViewMode: DiffViewMode;
 	diffIndicatorMode: DiffIndicatorMode;
@@ -84,6 +87,7 @@ export const DEFAULT_TOOL_DISPLAY_CONFIG: ToolDisplayConfig = {
 	previewLines: 8,
 	expandedPreviewMaxLines: 4000,
 	bashOutputMode: "opencode",
+	bashCallMode: "semantic",
 	bashCollapsedLines: 10,
 	diffViewMode: "auto",
 	diffIndicatorMode: "bars",

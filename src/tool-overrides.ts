@@ -24,6 +24,14 @@ import {
 import { Container, Spacer, Text } from "@earendil-works/pi-tui";
 import { resolvePiAgentDir } from "./agent-dir.js";
 import { renderBashCall } from "./bash-display.js";
+import {
+  getChangedEditFiles,
+  getSingleEditCommand,
+  isExploringCommands,
+  parseCommand,
+  type BashEditFileSnapshot,
+  type ParsedCommand,
+} from "./parse-command.js";
 import { logToolDisplayDebug } from "./debug-logger.js";
 import { registerCleanup } from "./disposable.js";
 import {
@@ -122,6 +130,10 @@ export interface WriteExecutionMeta {
   fileExistedBeforeWrite: boolean;
 }
 
+export interface BashEditExecutionMeta {
+  files: BashEditFileSnapshot[];
+}
+
 interface PendingDiffPreviewState {
   key?: string;
   data?: PendingDiffPreviewData;
@@ -141,6 +153,7 @@ const builtInToolCache = new Map<string, BuiltInTools>();
 const RTK_COMPACTION_LABEL = "compacted by RTK";
 export const WRITE_EXECUTION_META_LIMIT = 100;
 const WRITE_EXECUTION_META_STATE_KEY = "__piToolDisplayWriteExecutionMeta";
+const BASH_EDIT_META_STATE_KEY = "__piToolDisplayBashEditMeta";
 const EDIT_PENDING_PREVIEW_STATE_KEY = "__piToolDisplayEditPendingPreview";
 const WRITE_PENDING_PREVIEW_STATE_KEY = "__piToolDisplayWritePendingPreview";
 
@@ -553,6 +566,62 @@ export function getWriteExecutionMeta(
   if (carrier) {
     const storedMeta: WriteExecutionMeta = { ...pending };
     carrier[WRITE_EXECUTION_META_STATE_KEY] = storedMeta;
+    pendingMetaByToolCallId.delete(context.toolCallId);
+    return storedMeta;
+  }
+
+  return pending;
+}
+
+export function recordBashEditExecutionMeta(
+  pendingMetaByToolCallId: Map<string, BashEditExecutionMeta>,
+  toolCallId: string,
+  meta: BashEditExecutionMeta,
+): void {
+  pendingMetaByToolCallId.delete(toolCallId);
+  pendingMetaByToolCallId.set(toolCallId, meta);
+
+  while (pendingMetaByToolCallId.size > WRITE_EXECUTION_META_LIMIT) {
+    const oldestToolCallId: string | undefined = pendingMetaByToolCallId.keys().next().value as string | undefined;
+    if (oldestToolCallId === undefined) {
+      return;
+    }
+    pendingMetaByToolCallId.delete(oldestToolCallId);
+  }
+}
+
+export function clearBashEditExecutionMeta(
+  pendingMetaByToolCallId: Map<string, BashEditExecutionMeta>,
+): void {
+  pendingMetaByToolCallId.clear();
+}
+
+export function getBashEditExecutionMeta(
+  context: ToolRenderContextLike | undefined,
+  pendingMetaByToolCallId: Map<string, BashEditExecutionMeta>,
+): BashEditExecutionMeta | undefined {
+  if (!context) {
+    return undefined;
+  }
+
+  const carrier = toStateRecord(context.state);
+  const existing = carrier ? toRecord(carrier[BASH_EDIT_META_STATE_KEY]) : undefined;
+  if (existing && Array.isArray(existing.files)) {
+    return existing as unknown as BashEditExecutionMeta;
+  }
+
+  if (!context.toolCallId) {
+    return undefined;
+  }
+
+  const pending = pendingMetaByToolCallId.get(context.toolCallId);
+  if (!pending) {
+    return undefined;
+  }
+
+  if (carrier) {
+    const storedMeta: BashEditExecutionMeta = { files: pending.files.map((file) => ({ ...file })) };
+    carrier[BASH_EDIT_META_STATE_KEY] = storedMeta;
     pendingMetaByToolCallId.delete(context.toolCallId);
     return storedMeta;
   }
@@ -1080,6 +1149,116 @@ function renderBashErrorResult(
   return textResult(text);
 }
 
+function exploringOutputMode(
+  parsed: ParsedCommand[],
+  config: ToolDisplayConfig,
+): "hidden" | "summary" | "preview" {
+  if (parsed.every((item) => item.type === "read")) {
+    return config.readOutputMode;
+  }
+  if (config.searchOutputMode === "count") {
+    return "summary";
+  }
+  return config.searchOutputMode;
+}
+
+function formatExpandedBashCommand(command: string | undefined, theme: RenderTheme): string {
+  if (!command?.trim()) {
+    return "";
+  }
+  return theme.fg("muted", `$ ${command}`);
+}
+
+function renderExploringBashResult(
+  command: string | undefined,
+  rawOutput: string,
+  options: ToolRenderResultOptions,
+  config: ToolDisplayConfig,
+  theme: RenderTheme,
+  details: BashToolDetails | undefined,
+  parsed: ParsedCommand[],
+): Text {
+  const mode = exploringOutputMode(parsed, config);
+  const lines = prepareOutputLines(rawOutput, options);
+
+  if (options.expanded) {
+    const maxLines = getExpandedPreviewLineLimit(lines, config);
+    const commandLine = formatExpandedBashCommand(command, theme);
+    let preview = buildPreviewText(lines, maxLines, theme, true);
+    if (config.showTruncationHints) {
+      preview += formatBashTruncationHints(details, theme);
+    }
+    preview += formatExpandedPreviewCapHint(lines, config, theme);
+    if (!commandLine) {
+      return textResult(preview);
+    }
+    return textResult(preview ? `${commandLine}\n${preview}` : commandLine);
+  }
+
+  if (mode === "hidden") {
+    return textResult("");
+  }
+  if (mode === "summary") {
+    let summary = formatBashSummary(lines, details, theme, config.showTruncationHints);
+    summary += formatExpandHint(theme);
+    if (config.showTruncationHints) {
+      summary += formatBashTruncationHints(details, theme);
+    }
+    return textResult(summary);
+  }
+
+  const maxLines = config.previewLines;
+  return renderBashPreviewWithHints(lines, maxLines, config, theme, options, details);
+}
+
+function renderBashEditResult(
+  command: string | undefined,
+  files: BashEditFileSnapshot[],
+  result: { isError?: boolean },
+  options: ToolRenderResultOptions,
+  config: ToolDisplayConfig,
+  theme: RenderTheme,
+  details: BashToolDetails | undefined,
+  rawOutput: string,
+  context: ToolRenderContextLike | undefined,
+): Text | Container {
+  const container = new Container();
+  if (isToolError(result, context)) {
+    container.addChild(renderBashErrorResult(rawOutput, options, config, theme, details));
+    container.addChild(new Spacer(1));
+  }
+
+  for (const [index, file] of files.entries()) {
+    if (index > 0) {
+      container.addChild(new Spacer(1));
+    }
+    container.addChild(
+      renderWriteDiffResult(
+        file.nextContent,
+        {
+          expanded: options.expanded,
+          filePath: file.path,
+          previousContent: file.previousContent,
+          fileExistedBeforeWrite: file.fileExistedBeforeWrite,
+        },
+        config,
+        theme,
+        "",
+      ),
+    );
+  }
+
+  if (options.expanded) {
+    const commandLine = formatExpandedBashCommand(command, theme);
+    if (commandLine) {
+      container.addChild(new Spacer(1));
+      container.addChild(new Text(commandLine, 0, 0));
+    }
+  }
+
+  return container;
+}
+
 function renderSearchResult(
   result: ToolRenderInput,
   options: ToolRenderResultOptions,
@@ -1593,6 +1772,7 @@ export function registerToolDisplayOverrides(
   const builtInPromptMetadata = createLazyPromptMetadata(bootstrapTools);
   const clonedParameters = createLazyClonedParameters(bootstrapTools);
   const writeExecutionMetaByToolCallId = new Map<string, WriteExecutionMeta>();
+  const bashEditMetaByToolCallId = new Map<string, BashEditExecutionMeta>();
   const registeredBuiltInToolOverrides = new Set<BuiltInToolOverrideName>();
 
   const isExternallyOwnedBuiltInTool = (toolName: BuiltInToolOverrideName): boolean => {
@@ -1833,13 +2013,82 @@ export function registerToolDisplayOverrides(
       name: "bash",
     label: "bash",
     ...createBuiltinToolBase("bash"),
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const command = typeof params.command === "string" ? params.command : "";
+      let editMeta: BashEditExecutionMeta | undefined;
+      if (getConfig().bashCallMode === "semantic") {
+        const edit = getSingleEditCommand(parseCommand(command));
+        if (edit) {
+          editMeta = {
+            files: edit.paths.map((path) => {
+              const previous = captureExistingWriteContent(ctx.cwd, path);
+              return {
+                path,
+                previousContent: previous.content,
+                fileExistedBeforeWrite: previous.existed,
+              };
+            }),
+          };
+        }
+      }
+
+      const result = await getBuiltInTools(ctx.cwd).bash.execute(
+        toolCallId,
+        params as never,
+        signal as never,
+        onUpdate as never,
+      );
+
+      if (editMeta) {
+        for (const file of editMeta.files) {
+          const after = readWorkspaceUtf8File(ctx.cwd, file.path);
+          file.nextContent = after.content;
+        }
+        recordBashEditExecutionMeta(bashEditMetaByToolCallId, toolCallId, editMeta);
+      }
+
+      return result;
+    },
     renderCall(args, theme, context) {
-      return renderBashCall(args, theme, context as never);
+      return renderBashCall(args, theme, context as never, {
+        callMode: getConfig().bashCallMode,
+        editFiles: getBashEditExecutionMeta(context as ToolRenderContextLike, bashEditMetaByToolCallId)?.files,
+      });
     },
     renderResult(result, options, theme, context) {
       const config = getConfig();
       const details = result.details as BashToolDetails | undefined;
       const rawOutput = extractTextOutput(result);
+      const command = getStringField(context?.args, "command");
+      const parsed = config.bashCallMode === "semantic" && command
+        ? parseCommand(command)
+        : [{ type: "unknown" as const, cmd: command ?? "" }];
+      const editMeta = getBashEditExecutionMeta(context, bashEditMetaByToolCallId);
+      const changedFiles = editMeta ? getChangedEditFiles(editMeta.files) : [];
+
+      if (getSingleEditCommand(parsed) && changedFiles.length > 0 && !options.isPartial) {
+        return renderBashEditResult(
+          command,
+          changedFiles,
+          result,
+          options,
+          config,
+          theme,
+          details,
+          rawOutput,
+          context,
+        );
+      }
+
+      if (config.bashCallMode === "semantic" && isExploringCommands(parsed)) {
+        if (options.isPartial) {
+          return textResult("");
+        }
+        if (isToolError(result, context)) {
+          return renderBashErrorResult(rawOutput, options, config, theme, details);
+        }
+        return renderExploringBashResult(command, rawOutput, options, config, theme, details, parsed);
+      }
 
       if (options.isPartial) {
         return renderBashLivePreview(rawOutput, options, config, theme, details);
@@ -2110,11 +2359,13 @@ export function registerToolDisplayOverrides(
 
   pi.on("session_start", async () => {
     clearWriteExecutionMeta(writeExecutionMetaByToolCallId);
+    clearBashEditExecutionMeta(bashEditMetaByToolCallId);
     registerMcpToolOverrides();
     scheduleMcpToolOverrideDiscovery();
   });
   pi.on("before_agent_start", async () => {
     clearWriteExecutionMeta(writeExecutionMetaByToolCallId);
+    clearBashEditExecutionMeta(bashEditMetaByToolCallId);
     registerMcpToolOverrides();
     scheduleMcpToolOverrideDiscovery();
   });

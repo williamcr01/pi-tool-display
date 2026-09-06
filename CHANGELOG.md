@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Semantic bash call labels for common inspection commands (`read` / `search` / `list`) and inline `python3` file writes, which snapshot the target file and reuse the existing edit/write diff renderer.
+- `bashCallMode` setting (`semantic` default, or `raw`) with a `/tool-display` toggle.
+
 ## [0.5.0] - 2026-07-03
 
 ### Added

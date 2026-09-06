@@ -49,6 +49,7 @@ function summarizeConfig(config: ToolDisplayConfig, capabilities: ToolDisplayCap
 		`preview=${config.previewLines}`,
 		`expandedMax=${config.expandedPreviewMaxLines}`,
 		`bash=${config.bashOutputMode}`,
+		`bashCall=${config.bashCallMode}`,
 		`bashLines=${config.bashCollapsedLines}`,
 		`diff=${config.diffViewMode}/${config.diffIndicatorMode}@${config.diffSplitMinWidth}`,
 		`diffLines=${config.diffCollapsedLines}`,
@@ -228,6 +229,26 @@ function buildInspectorSettings(
 			searchTerms: ["bash", "shell", "stdout", "command", "opencode"],
 		},
 		{
+			id: "bashCallMode",
+			label: "Bash call labels",
+			currentValue: config.bashCallMode,
+			values: ["semantic", "raw"],
+			inspectorTitle: "Bash Call Labels",
+			inspectorSummary: [
+				"Controls whether known shell commands are shown as compact read/list/search/edit labels instead of the raw command.",
+				"Semantic mode hides cat, rg, ls, and inline python file writes behind the same compact headers used by dedicated tools.",
+			],
+			inspectorOptions: [
+				"semantic — classify common commands as read, list, search, or edit",
+				"raw — always show the full $ command line",
+			],
+			inspectorAdvanced: buildAdvancedNotes(config, capabilities, [
+				"Unknown or mutating commands always stay on the raw $ command path, even in semantic mode.",
+			]),
+			inspectorPath: configPath,
+			searchTerms: ["bash", "semantic", "command", "read", "search", "python"],
+		},
+		{
 			id: "bashCollapsedLines",
 			label: "Bash collapsed lines",
 			currentValue: String(config.bashCollapsedLines),
@@ -353,6 +374,11 @@ function applySetting(config: ToolDisplayConfig, id: string, value: string): Too
 			return {
 				...config,
 				bashOutputMode: value as ToolDisplayConfig["bashOutputMode"],
+			};
+		case "bashCallMode":
+			return {
+				...config,
+				bashCallMode: value as ToolDisplayConfig["bashCallMode"],
 			};
 		case "bashCollapsedLines":
 			return {

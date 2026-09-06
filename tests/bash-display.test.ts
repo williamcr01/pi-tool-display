@@ -440,3 +440,82 @@ test("renderBashCall handles numeric timeout with decimal value", () => {
 	);
 	assert.equal(renderedText(text), "$ sleep 1 (timeout 2.5s)");
 });
+
+test("renderBashCall semantic mode hides known readers behind read labels", () => {
+	const text = renderBashCall(
+		{ command: "cat webview/README.md" },
+		createPassThroughTheme(),
+		makeContext(),
+		{ callMode: "semantic" },
+	);
+	assert.equal(renderedText(text), "read README.md");
+});
+
+test("renderBashCall semantic mode labels searches and lists", () => {
+	assert.equal(
+		renderedText(
+			renderBashCall(
+				{ command: 'rg -n "TODO" src' },
+				createPassThroughTheme(),
+				makeContext(),
+				{ callMode: "semantic" },
+			),
+		),
+		"search /TODO/ in src",
+	);
+	assert.equal(
+		renderedText(
+			renderBashCall(
+				{ command: "ls -la src" },
+				createPassThroughTheme(),
+				makeContext(),
+				{ callMode: "semantic" },
+			),
+		),
+		"list src",
+	);
+});
+
+test("renderBashCall semantic mode keeps unknown commands raw", () => {
+	const text = renderBashCall(
+		{ command: "npm test", timeout: 30 },
+		createPassThroughTheme(),
+		makeContext(),
+		{ callMode: "semantic" },
+	);
+	assert.equal(renderedText(text), "$ npm test (timeout 30s)");
+});
+
+test("renderBashCall semantic mode labels python writes as edit", () => {
+	const text = renderBashCall(
+		{ command: `python3 -c "from pathlib import Path; Path('src/foo.ts').write_text('x')"` },
+		createPassThroughTheme(),
+		makeContext(),
+		{ callMode: "semantic" },
+	);
+	assert.equal(renderedText(text), "edit src/foo.ts");
+});
+
+test("renderBashCall semantic spinner prefixes classified labels", () => {
+	const state: Record<string, unknown> = {};
+	const text = renderBashCall(
+		{ command: "cat README.md" },
+		createPassThroughTheme(),
+		makeContext({
+			executionStarted: true,
+			isPartial: true,
+			state,
+		}),
+		{ callMode: "semantic" },
+	);
+	try {
+		assert.match(renderedText(text), /^⠋ read README.md · 0s$/);
+	} finally {
+		renderBashCall(
+			{ command: "cat README.md" },
+			createPassThroughTheme(),
+			makeContext({ executionStarted: true, isPartial: false, state, lastComponent: text }),
+			{ callMode: "semantic" },
+		);
+	}
+});

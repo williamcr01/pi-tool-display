@@ -28,6 +28,7 @@
   "previewLines": 8,
   "expandedPreviewMaxLines": 4000,
   "bashOutputMode": "opencode",
+  "bashCallMode": "semantic",
   "bashCollapsedLines": 10,
   "diffViewMode": "auto",
   "diffIndicatorMode": "bars",

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, 
 import { dirname, join } from "node:path";
 import {
 	BUILT_IN_TOOL_OVERRIDE_NAMES,
+	BASH_CALL_MODES,
 	BASH_OUTPUT_MODES,
 	CUSTOM_TOOL_OUTPUT_MODES,
 	CUSTOM_TOOL_OVERRIDE_KINDS,
@@ -63,6 +64,12 @@ function toBashOutputMode(value: unknown): ToolDisplayConfig["bashOutputMode"] {
 	return BASH_OUTPUT_MODES.includes(value as ToolDisplayConfig["bashOutputMode"])
 		? (value as ToolDisplayConfig["bashOutputMode"])
 		: DEFAULT_TOOL_DISPLAY_CONFIG.bashOutputMode;
+}
+
+function toBashCallMode(value: unknown): ToolDisplayConfig["bashCallMode"] {
+	return BASH_CALL_MODES.includes(value as ToolDisplayConfig["bashCallMode"])
+		? (value as ToolDisplayConfig["bashCallMode"])
+		: DEFAULT_TOOL_DISPLAY_CONFIG.bashCallMode;
 }
 
 function toDiffViewMode(value: unknown): ToolDisplayConfig["diffViewMode"] {
@@ -226,6 +233,7 @@ export function normalizeToolDisplayConfig(raw: unknown): ToolDisplayConfig {
 			DEFAULT_TOOL_DISPLAY_CONFIG.expandedPreviewMaxLines,
 		),
 		bashOutputMode: toBashOutputMode(source.bashOutputMode),
+		bashCallMode: toBashCallMode(source.bashCallMode),
 		bashCollapsedLines: clampNumber(source.bashCollapsedLines, 0, 80, DEFAULT_TOOL_DISPLAY_CONFIG.bashCollapsedLines),
 		diffViewMode: toDiffViewMode(source.diffViewMode),
 		diffIndicatorMode: toDiffIndicatorMode(source.diffIndicatorMode),

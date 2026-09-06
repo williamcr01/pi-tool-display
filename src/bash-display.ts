@@ -1,5 +1,16 @@
+import { existsSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 import { Text } from "@earendil-works/pi-tui";
 import { registerCleanup, registerTimer } from "./disposable.js";
+import {
+	getChangedEditFiles,
+	getSingleEditCommand,
+	isExploringCommands,
+	parseCommand,
+	type BashEditFileSnapshot,
+	type ParsedCommand,
+} from "./parse-command.js";
+import { shortenPath } from "./render-utils.js";
 
 const BASH_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 const BASH_SPINNER_INTERVAL_MS = 200;
@@ -36,7 +47,15 @@ interface BashCallRenderContextLike {
 	lastComponent?: unknown;
 	state?: unknown;
 	toolCallId?: string;
+	cwd?: string;
 }
+
+export interface BashCallRenderOptions {
+	callMode?: "raw" | "semantic";
+	editFiles?: BashEditFileSnapshot[];
+}
+
+export type { BashEditFileSnapshot };
 
 const spinnerStatesByToolCallId = new Map<string, BashSpinnerState>();
 let nextSyntheticToolCallId = 0;
@@ -136,7 +155,7 @@ function buildCommandDisplay(args: BashCallArgs): string {
 	return prefix ? `${prefix} ${command}` : command;
 }
 
-function buildBashCallText(
+function buildRawBashCallText(
 	args: BashCallArgs,
 	theme: BashCallRenderTheme,
 	spinnerFrame?: string,
@@ -161,10 +180,113 @@ function buildBashCallText(
 	return `${spinnerPrefix}${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", commandDisplay)}${shellSuffix}${timeoutSuffix}${elapsedSuffix}`;
 }
 
+function fileExistedOnDisk(path: string, cwd: string | undefined): boolean | undefined {
+	if (!cwd) {
+		return undefined;
+	}
+	try {
+		const resolved = isAbsolute(path) ? path : resolve(cwd, path);
+		return existsSync(resolved);
+	} catch {
+		return undefined;
+	}
+}
+
+function formatParsedCallLabel(
+	parsed: ParsedCommand,
+	theme: BashCallRenderTheme,
+	cwd: string | undefined,
+	editFiles: BashEditFileSnapshot[] | undefined,
+): string {
+	if (parsed.type === "read") {
+		return `${theme.fg("toolTitle", theme.bold("read"))} ${theme.fg("accent", parsed.name)}`;
+	}
+	if (parsed.type === "list") {
+		return `${theme.fg("toolTitle", theme.bold("list"))} ${theme.fg("accent", parsed.path || ".")}`;
+	}
+	if (parsed.type === "search") {
+		const query = parsed.query ? `/${parsed.query}/` : parsed.cmd;
+		const suffix = parsed.path ? ` in ${parsed.path}` : "";
+		return `${theme.fg("toolTitle", theme.bold("search"))} ${theme.fg("accent", query)}${theme.fg("muted", suffix)}`;
+	}
+	if (parsed.type !== "edit") {
+		return `${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", parsed.cmd)}`;
+	}
+
+	const labels = parsed.paths.map((path) => {
+		const snapshot = editFiles?.find((file) => file.path === path);
+		const existed = snapshot?.fileExistedBeforeWrite ?? fileExistedOnDisk(path, cwd);
+		const verb = existed === false ? "write" : "edit";
+		return `${theme.fg("toolTitle", theme.bold(verb))} ${theme.fg("accent", shortenPath(path) || path)}`;
+	});
+	return labels.join(theme.fg("muted", " · "));
+}
+
+function buildSemanticBashCallText(
+	args: BashCallArgs,
+	theme: BashCallRenderTheme,
+	context: BashCallRenderContextLike,
+	options: BashCallRenderOptions,
+	spinnerFrame?: string,
+	elapsedMs?: number,
+): string | undefined {
+	const command = typeof args.command === "string" ? args.command : "";
+	const parsed = parseCommand(command);
+	const edit = getSingleEditCommand(parsed);
+	const spinning = Boolean(spinnerFrame);
+	if (edit) {
+		const changed = options.editFiles ? getChangedEditFiles(options.editFiles) : [];
+		if (!spinning && options.editFiles && changed.length === 0) {
+			return undefined;
+		}
+		const files = changed.length > 0 ? changed : options.editFiles;
+		return formatSemanticLine(formatParsedCallLabel(edit, theme, context.cwd, files), theme, spinnerFrame, elapsedMs);
+	}
+	if (!isExploringCommands(parsed)) {
+		return undefined;
+	}
+	const label = parsed
+		.map((item) => formatParsedCallLabel(item, theme, context.cwd, options.editFiles))
+		.join(theme.fg("muted", " · "));
+	return formatSemanticLine(label, theme, spinnerFrame, elapsedMs);
+}
+
+function formatSemanticLine(
+	label: string,
+	theme: BashCallRenderTheme,
+	spinnerFrame?: string,
+	elapsedMs?: number,
+): string {
+	const spinnerPrefix = spinnerFrame ? `${theme.fg("warning", `${spinnerFrame} `)}` : "";
+	const elapsedSuffix =
+		spinnerFrame && elapsedMs !== undefined
+			? theme.fg("muted", ` · ${formatElapsed(elapsedMs)}`)
+			: "";
+	return `${spinnerPrefix}${label}${elapsedSuffix}`;
+}
+
+function buildBashCallText(
+	args: BashCallArgs,
+	theme: BashCallRenderTheme,
+	context: BashCallRenderContextLike,
+	options: BashCallRenderOptions,
+	spinnerFrame?: string,
+	elapsedMs?: number,
+): string {
+	if (options.callMode === "semantic") {
+		const semantic = buildSemanticBashCallText(args, theme, context, options, spinnerFrame, elapsedMs);
+		if (semantic) {
+			return semantic;
+		}
+	}
+	return buildRawBashCallText(args, theme, spinnerFrame, elapsedMs);
+}
+
 export function renderBashCall(
 	args: BashCallArgs,
 	theme: BashCallRenderTheme,
 	context: BashCallRenderContextLike,
+	options: BashCallRenderOptions = {},
 ): Text {
 	const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
 	const carrier = toStateCarrier(context.state);
@@ -174,7 +296,7 @@ export function renderBashCall(
 
 	if (!shouldSpin) {
 		stopSpinner(toolCallId, spinnerState);
-		text.setText(buildBashCallText(args, theme));
+		text.setText(buildBashCallText(args, theme, context, options));
 		return text;
 	}
 
@@ -187,6 +309,8 @@ export function renderBashCall(
 					buildBashCallText(
 						args,
 						theme,
+						context,
+						options,
 						BASH_SPINNER_FRAMES[spinnerState.frameIndex],
 						Date.now() - (spinnerState.startedAt ?? Date.now()),
 					),
@@ -207,6 +331,6 @@ export function renderBashCall(
 	const elapsedMs = spinnerState?.startedAt !== undefined
 		? Date.now() - spinnerState.startedAt
 		: undefined;
-	text.setText(buildBashCallText(args, theme, spinnerFrame, elapsedMs));
+	text.setText(buildBashCallText(args, theme, context, options, spinnerFrame, elapsedMs));
 	return text;
 }

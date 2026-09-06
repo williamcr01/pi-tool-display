@@ -24,6 +24,7 @@ OpenCode-style tool rendering for the [Pi coding agent](https://github.com/mario
 ## Features
 
 - **Compact built-in tool rendering** for `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`
+- **Semantic bash labels** that hide common `cat`/`rg`/`ls` commands behind `read`/`search`/`list`, and render inline `python3` file writes as `edit`/`write` diffs
 - **MCP-aware rendering** with hidden, summary, and preview modes
 - **Opt-in custom tool overrides** for noisy extension tools, defaulting to generic rendering unless `kind: "mcp"` is selected
 - **Adaptive edit/write diffs** with split or unified layouts, syntax highlighting, inline emphasis, and narrow-pane width clamping
@@ -118,6 +119,17 @@ import { decorateToolForDisplay, decorateMcpToolForDisplay } from "pi-tool-displ
 - **`balanced`**: compact summaries with line counts and match totals; bash shows line count only
 - **`verbose`**: larger previews for read/search/MCP/bash output
 
+Semantic bash labels are on by default in every preset. Unknown commands still render as `$ command`.
+
+### Bash Call Labels
+
+| Mode | Behavior |
+|------|----------|
+| `semantic` | Classify common inspection commands as `read` / `search` / `list`, and inline Python file writes as `edit` / `write` diffs |
+| `raw` | Always show the full `$ command` line |
+
+Expanding a classified bash result still reveals the original command. Mutating, mixed, or unrecognized commands stay on the raw path.
+
 ### Bash Output Modes
 
 | Mode | Behavior |
@@ -151,6 +163,7 @@ A starter template is included at `config/config.example.json`.
 | `previewLines` | number | `8` | Lines shown in collapsed preview mode |
 | `expandedPreviewMaxLines` | number | `4000` | Max preview lines when fully expanded |
 | `bashOutputMode` | string | `"opencode"` | `opencode` (collapse), `summary` (line count), or `preview` (show lines) |
+| `bashCallMode` | string | `"semantic"` | `semantic` (classify known commands) or `raw` (always show `$ command`) |
 | `bashCollapsedLines` | number | `10` | Lines shown for collapsed bash output (opencode mode) |
 | `diffViewMode` | string | `"auto"` | `auto`, `split`, or `unified` |
 | `diffIndicatorMode` | string | `"bars"` | `bars` (vertical indicators), `classic` (+/- markers), or `none` |
@@ -355,6 +368,7 @@ pi-tool-display/
 │   ├── disposable.ts                # Reload-safe cleanup registry for tool overrides, patches, and timers
 │   ├── diff-renderer.ts             # Edit/write diff rendering engine
 │   ├── line-width-safety.ts         # Width clamping helpers for narrow panes
+│   ├── parse-command.ts             # Shell command classification for semantic bash labels
 │   ├── pending-diff-preview.ts      # Partial edit/write preview projection helpers
 │   ├── presets.ts                   # Preset definitions and matching
 │   ├── render-utils.ts              # Shared rendering helpers
@@ -373,6 +387,8 @@ pi-tool-display/
 └── tests/
     ├── ansi-utils.test.ts           # ANSI utility tests including foreground RGB preservation
     ├── bash-display.test.ts         # Bash display and spinner tests
+    ├── bash-semantic-overrides.test.ts # Semantic bash labels, hidden exploring output, and python edits
+    ├── parse-command.test.ts        # Shell command classification tests
     ├── capabilities-edge.test.ts    # Capability detection edge cases
     ├── config-modal.test.ts         # Config modal tests
     ├── custom-tool-overrides.test.ts # Opt-in custom tool override tests
