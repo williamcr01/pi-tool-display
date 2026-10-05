@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import {
   UserMessageComponent,
@@ -978,7 +978,8 @@ test("11: each tool override call clones parameters independently", () => {
 
 test("12: config-store reloads config on fingerprint change between calls", () => {
   const configUrl = new URL("../config.json", import.meta.url);
-  const originalConfigJson = readFileSync(configUrl, "utf8");
+  const hadOriginalConfig = existsSync(configUrl);
+  const originalConfigJson = hadOriginalConfig ? readFileSync(configUrl, "utf8") : undefined;
 
   try {
     const initialResult = loadToolDisplayConfig();
@@ -1008,7 +1009,11 @@ test("12: config-store reloads config on fingerprint change between calls", () =
       "re-loaded search output mode matches saved config",
     );
   } finally {
-    writeFileSync(configUrl, originalConfigJson, "utf8");
+    if (originalConfigJson !== undefined) {
+      writeFileSync(configUrl, originalConfigJson, "utf8");
+    } else if (existsSync(configUrl)) {
+      unlinkSync(configUrl);
+    }
   }
 });
 

@@ -125,7 +125,10 @@ test("registerToolDisplayOverrides copies built-in prompt metadata onto overridd
 	assert.equal(byName.get("grep")?.promptGuidelines, undefined);
 	assert.equal(byName.get("find")?.promptGuidelines, undefined);
 	assert.equal(byName.get("ls")?.promptGuidelines, undefined);
-	assert.equal(byName.get("bash")?.promptGuidelines, undefined);
+	assert.deepEqual(
+		byName.get("bash")?.promptGuidelines,
+		(builtInTools.bash as unknown as RegisteredToolLike).promptGuidelines,
+	);
 });
 
 test("registerToolDisplayOverrides registers built-in display renderers during extension load for pre-bind history rendering", () => {
